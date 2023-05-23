@@ -1,0 +1,38 @@
+cabal-version:      3.6
+name:               hatch
+version:            0.0.0
+synopsis:
+homepage:
+license:            NONE
+author:             Seth Hubbard
+maintainer:         seth.h@bluechipfinancial.com
+category:           Data
+extra-source-files: CHANGELOG.md
+
+library
+    exposed-modules:  Hatch.Decode, Hatch.Encode, Hatch.Types
+    -- other-modules:
+    -- other-extensions:
+    build-depends:    
+      base >=4.16.4.0,
+      aeson,
+      chronos,
+      megaparsec,
+      text
+    hs-source-dirs:   src
+    default-language: Haskell2010
+
+executable hatch
+    hs-source-dirs:   app
+    main-is:          Main.hs
+
+    -- Modules included in this executable, other than Main.
+    -- other-modules:
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:
+      base >=4.16.4.0,
+      optparse-applicative,
+      hatch
+    default-language: Haskell2010
