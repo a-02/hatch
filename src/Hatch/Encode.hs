@@ -1,33 +1,52 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE LambdaCase #-}
 
 
 module Hatch.Encode where
 
-import Data.Void
 import Chronos
-import Hatch.Types
+import Control.Monad
+import Data.Char
 import qualified Data.Text as T
 import Text.Megaparsec
 import Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
+import Hatch.Types
 
-encode :: T.Text -> ACH
-encode = encode
+encode :: T.Text -> Maybe ACH
+encode = parseMaybe parseACH
 
-type ACHParser = Parsec Void T.Text
+parseACH :: ACHParser ACH
+parseACH = do
+  fileHeaderRecord <- parseFileHeaderRecord
+  batchRecords <- some parseBatchRecord
+  fileControlRecord <- parseFileControlRecord
+  void $ many parsePadding
+  eof
+  return ACH{..}
 
-integer :: ACHParser Int
-integer = L.lexeme sc L.decimal
+parseBatchRecord :: ACHParser BatchRecord
+parseBatchRecord = do
+  batchHeaderRecord <- parseBatchHeaderRecord
+  let secc = standardEntryClassCode batchHeaderRecord
+  entryDetails <- some $ parseEntryDetail secc
+  batchControlRecord <- parseBatchControlRecord
+  return BatchRecord{..}
 
-sc :: ACHParser ()
-sc = L.space
-  space1
-  (L.skipLineComment "//")
-  (L.skipBlockComment "/*" "*/")
+parsePadding :: ACHParser ()
+parsePadding = void (count 94 (char '9') >> (void eol <|> eof))
+
+parseEntryDetail :: StandardEntryClassCode -> ACHParser EntryDetail
+parseEntryDetail secc = do
+  entryDetailRecord <- parseBySECC secc
+  addenda <- parseAddendaBySECC secc
+  return EntryDetail{..}
 
 parseFileHeaderRecord :: ACHParser FileHeaderRecord
 parseFileHeaderRecord = do
@@ -220,6 +239,7 @@ parseRCKEntryDetailRecord = do
   rckDiscretionaryData <- parseOptionalNonNumber 2
   rckAddendaRecordIndicator <- (False <$ char '0') <|> (True <$ char '1')
   rckTraceNumber <- parseLeftJustified 15 digitChar
+  _ <- eol
   return EntryDetailRecordRCK{..}
 
 parseTELEntryDetailRecord :: ACHParser EntryDetailRecordTEL
@@ -235,22 +255,34 @@ parseTELEntryDetailRecord = do
   telPaymentTypeCode <- parseOptionalNonNumber 2
   telAddendaRecordIndicator <- (False <$ char '0') <|> (True <$ char '1')
   telTraceNumber <- parseRightJustified 15 digitChar 
+  _ <- eol
   return EntryDetailRecordTEL{..}
 
 parseWEBEntryDetailRecord :: ACHParser EntryDetailRecordWEB
 parseWEBEntryDetailRecord = do
   webRecordTypeCode <- parseEntryDetailRecordTypeCode
-  webTransactionCode <- parseTransactionCodeSmall
+  webTransactionCode <- parseTransactionCodeFull
   webRDFIRoutingTransitNumber <- parseRightJustified 8 digitChar
   webCheckDigit <- digitChar
   webDFIAccountNumber <- parseLeftJustified 17 printChar
   webAmount <- parseRightJustified 10 digitChar
-  webIndividualIdentificationNumber <- parseOptionalNumber 15
+  webIndividualIdentificationNumber <- parseOptionalNonNumber 15
   webIndividualName <- parseLeftJustified 22 printChar 
   webPaymentTypeCode <- parseOptionalNonNumber 2
   webAddendaRecordIndicator <- (False <$ char '0') <|> (True <$ char '1')
   webTraceNumber <- parseLeftJustified 15 digitChar
+  _ <- eol
   return EntryDetailRecordWEB{..}
+
+parseWEBAddenda :: ACHParser AddendaRecordWEB
+parseWEBAddenda = do
+  addendaWEBRecordTypeCode <- parseAddendaRecordTypeCode
+  addendaWEBAddendaTypeCode <- AddendaTypeCode <$ string "05"
+  addendaWEBPaymentRelatedInformation <- parseOptionalNonNumber 80
+  addendaWEBAddendaSequenceNumber <- parseRightJustified 4 digitChar
+  addendaWEBEntryDetailSequenceNumber <- parseRightJustified 7 digitChar
+  _ <- eol
+  return AddendaRecordWEB{..}
 
 parseBatchControlRecord :: ACHParser BatchControlRecord
 parseBatchControlRecord = do
@@ -265,6 +297,7 @@ parseBatchControlRecord = do
   batchControlReserved <- Reserved <$ count 6 spaceChar
   batchControlOriginatingDFIIdentification <- parseRightJustified 8 digitChar
   batchControlBatchNumber <- parseRightJustified 7 digitChar
+  _ <- eol
   return BatchControlRecord{..}
 
 parseFileControlRecord :: ACHParser FileControlRecord
@@ -277,6 +310,7 @@ parseFileControlRecord = do
   totalDebitInFile <- parseRightJustified 12 digitChar
   totalCreditInFile <- parseRightJustified 12 digitChar
   fileControlReserved <- Reserved <$ count 39 spaceChar
+  _ <- eol
   return FileControlRecord{..}
 
 parseDiscretionaryData :: ACHParser DiscretionaryData
@@ -390,7 +424,7 @@ parseRightJustified amt p = do
 -- Text fields in an ACH file are always left-justified.
 parseLeftJustified :: Int -> ACHParser Char -> ACHParser T.Text
 parseLeftJustified amt p = do
-   first <- alphaNumChar
+   first <- satisfy (not . isSpace) <?> "not a space"
    rest <- countText (amt - 1) p
    return $ first `T.cons` rest
 
@@ -446,3 +480,24 @@ countText n' p = go id n'
       else do
         x <- p
         go (f . (x `T.cons`)) (n - 1)
+
+parseBySECC :: StandardEntryClassCode -> ACHParser EntryDetailRecord
+parseBySECC = \case
+  ARC -> ARCRecord <$> parseARCEntryDetailRecord
+  BOC -> BOCRecord <$> parseBOCEntryDetailRecord
+  CCD -> CCDRecord <$> parseCCDEntryDetailRecord
+  CTX -> CTXRecord <$> parseCTXEntryDetailRecord
+  POP -> POPRecord <$> parsePOPEntryDetailRecord
+  PPD -> PPDRecord <$> parsePPDEntryDetailRecord
+  RCK -> RCKRecord <$> parseRCKEntryDetailRecord
+  TEL -> TELRecord <$> parseTELEntryDetailRecord
+  WEB -> WEBRecord <$> parseWEBEntryDetailRecord
+  _   -> error "Unsupported SEC Code."
+
+parseAddendaBySECC :: StandardEntryClassCode -> ACHParser [Addenda]
+parseAddendaBySECC = \case
+  CCD -> ((:[]) . CCDAddenda <$> parseCCDAddenda) <|> pure [] -- one or none
+  CTX -> many $ CTXAddenda <$> parseCTXAddenda
+  PPD -> many $ PPDAddenda <$> parsePPDAddenda
+  WEB -> ((:[]) . WEBAddenda <$> parseWEBAddenda) <|> pure [] -- one or none
+  _   -> pure []

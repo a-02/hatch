@@ -1,10 +1,15 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE QuantifiedConstraints #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Hatch.Types where
 
 import Chronos
+import Data.Void
 import Data.Text
+import Text.Megaparsec
+
+type ACHParser = Parsec Void Text
 
 data ACH = ACH
     { fileHeaderRecord :: FileHeaderRecord
@@ -20,8 +25,9 @@ data BatchRecord = BatchRecord
     }
     deriving (Show)
 
-newtype EntryDetail = EntryDetail
+data EntryDetail = EntryDetail
     { entryDetailRecord :: EntryDetailRecord
+    , addenda :: [Addenda]
     }
     deriving (Show)
 
@@ -113,16 +119,17 @@ data OriginatorStatusCode = OriginatorStatusCode deriving (Show)
 data EntryDetailRecord
     = ARCRecord EntryDetailRecordARC
     | BOCRecord EntryDetailRecordBOC
-    | CCDRecord (EntryDetailRecordCCD, Maybe AddendaRecordCCD)
-    | CTXRecord (EntryDetailRecordCTX, [AddendaRecordCTX])
+    | CCDRecord EntryDetailRecordCCD -- (EntryDetailRecordCCD, Maybe AddendaRecordCCD)
+    | CTXRecord EntryDetailRecordCTX -- (EntryDetailRecordCTX, [AddendaRecordCTX])
     | --  IATRecord EntryDetailRecordIAT |
       POPRecord EntryDetailRecordPOP
     | PPDRecord EntryDetailRecordPPD
     | RCKRecord EntryDetailRecordRCK
     | TELRecord EntryDetailRecordTEL
-    | WEBRecord (EntryDetailRecordWEB, Maybe AddendaRecordWEB)
+    | WEBRecord EntryDetailRecordWEB -- (EntryDetailRecordWEB, Maybe AddendaRecordWEB)
     | Unsupported
-    deriving (Show)
+    deriving Show
+
 
 data EntryDetailRecordARC = EntryDetailRecordARC
     { arcRecordTypeCode :: RecordTypeCode -- "6" for all entry details
@@ -266,7 +273,7 @@ data EntryDetailRecordTEL = EntryDetailRecordTEL
 
 data EntryDetailRecordWEB = EntryDetailRecordWEB
     { webRecordTypeCode :: RecordTypeCode
-    , webTransactionCode :: TransactionCodeSmall
+    , webTransactionCode :: TransactionCodeFull
     , webRDFIRoutingTransitNumber :: Text
     , webCheckDigit :: Char
     , webDFIAccountNumber :: Text
