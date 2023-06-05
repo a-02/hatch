@@ -22,7 +22,7 @@ common shared
 
 library
     import: shared
-    exposed-modules:  Hatch.Decode, Hatch.Encode, Hatch.Types
+    exposed-modules:  Hatch.Decode, Hatch.Encode, Hatch.Types, Hatch.Validate
     -- other-modules:
     -- other-extensions:
     hs-source-dirs:   src
